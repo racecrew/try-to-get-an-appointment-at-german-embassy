@@ -83,7 +83,7 @@ class Appointment:
         else:
             return ""
 
-    def try_monthly_appointments(self):
+    def try_monthly_appointments(self, months=3):
         html_page = self.get_html_page(self.get_url_month_appointment())
         jsessionid = html_page.cookies['JSESSIONID']
         keks = html_page.cookies['KEKS']
@@ -96,7 +96,7 @@ class Appointment:
                 clipboard.copy(base64_img)
                 captcha_text = __CaptchaSolverFacade.solve_captcha(base64_img)
 
-                date_to_check = (datetime.date.today() + datetime.timedelta(0)).strftime("%d.%m.%Y")
+                date_to_check = (datetime.date.today()).strftime("%d.%m.%Y")
 
                 payload = {
                     "locationCode": '"' + self.get_location_code() + '"',
@@ -111,8 +111,21 @@ class Appointment:
             else:
                 sys.exit("extracted captcha is not a base64 encoded string")
 
-        for i in range(0, 90):
-            date_to_check = (datetime.date.today() + datetime.timedelta(i)).strftime("%d.%m.%Y")
+        today = datetime.date.today()
+        cur_day = today.day
+        cur_month = today.month
+        cur_year = today.year
+        for i in range(0, months):
+            if cur_month == 12 and i < months:
+                cur_year += 1
+
+            if i > 0:
+                cur_day = 1
+                cur_month = cur_month + 1
+                if cur_month > 12:
+                    cur_month = 1
+
+            date_to_check = str(cur_day) + "." + str(cur_month) + "." + str(cur_year)
 
             payload = {
                 "locationCode": '"' + self.get_location_code() + '"',

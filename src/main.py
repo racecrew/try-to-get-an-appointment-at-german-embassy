@@ -6,5 +6,6 @@ def main():
     app = Appointment("kiew", "nationaleVisa")
     app.try_monthly_appointments()
 
+
 if __name__ == "__main__":
     main()
