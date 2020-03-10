@@ -1,11 +1,15 @@
-from src.CaptchaSolverFacade import CaptchaSolverFacade
-import requests
-from bs4 import BeautifulSoup
-import clipboard
-import datetime
 import base64
 import binascii
+import datetime
+import json
+import os.path
 import sys
+
+import clipboard
+import requests
+from bs4 import BeautifulSoup
+
+from src.CaptchaSolverFacade import CaptchaSolverFacade
 
 
 class Appointment:
@@ -45,7 +49,8 @@ class Appointment:
     __location_code = ""
     __visa = ""
 
-    __headers = {'content-type': 'text/html;charset=UTF-8'}
+    __headers = {'Content-Type': 'application/x-www-form-urlencoded',
+                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/70.0.3538.77 Safari/537.36'}
 
     def __init__(self, location_code, visa):
         self.__location_code = location_code
@@ -66,9 +71,6 @@ class Appointment:
                "&realmId=" + str(self.get_realm_id()) + \
                "&categoryId=" + str(self.get_category_id())
 
-    def get_html_page(self, url):
-        return requests.get(url, headers=self.__headers)
-
     def get_captcha_as_base64(self, html_page_content):
         soup = BeautifulSoup(html_page_content, features="lxml")
         captcha_style_value = soup.find(name="captcha").find(name="div").get('style')
@@ -83,13 +85,19 @@ class Appointment:
         else:
             return ""
 
-    def try_monthly_appointments(self, months=3):
-        html_page = self.get_html_page(self.get_url_month_appointment())
-        jsessionid = html_page.cookies['JSESSIONID']
-        keks = html_page.cookies['KEKS']
-        cookies = dict(JSESSIONID=jsessionid, KEKS=keks)
+    def write_json_file(self, filename, data):
+        with open(filename, 'w') as outfile:
+            json.dump(data, outfile)
 
-        base64_img = self.get_captcha_as_base64(html_page.content)
+    def read_json_file(self, filename):
+        if os.path.isfile(filename):
+            with open(filename, 'r') as json_file:
+                data = json_file.read()
+            return json.loads(data)
+        else:
+            return {"jsessionid": "", "keks": ""}
+
+    def do_request_new_session(self, base64_img, cookies):
         if base64_img != "":
             if base64_img != "binascii.Error":
                 __CaptchaSolverFacade = CaptchaSolverFacade()
@@ -107,9 +115,37 @@ class Appointment:
                     "action": "appointment_showMonth:Weiter"
                 }
 
-                html_page_monthly = requests.post(url=self.__url_month_appointment, headers={'Content-Type': 'application/x-www-form-urlencoded'}, data=payload, cookies=cookies)
+                return requests.post(url=self.__url_month_appointment,
+                                     headers=self.__headers,
+                                     data=payload)
             else:
                 sys.exit("extracted captcha is not a base64 encoded string")
+
+    def try_monthly_appointments(self, months=3):
+        session_data = self.read_json_file("session_data.json")
+        cookies = dict(JSESSIONID=session_data["jsessionid"], KEKS=session_data["keks"])
+
+        date_to_check = (datetime.date.today()).strftime("%d.%m.%Y")
+        payload = {
+            "locationCode": '"' + self.get_location_code() + '"',
+            "realmId": str(self.get_realm_id()),
+            "categoryId": str(self.get_category_id()),
+            "dateStr": date_to_check,
+            "action": "appointment_showMonth:Weiter"
+        }
+        html_page = requests.post(url=self.__url_month_appointment,
+                                  headers=self.__headers,
+                                  cookies=cookies,
+                                  data=payload)
+        base64_img = self.get_captcha_as_base64(html_page.content)
+
+        request_new_session = base64_img != "" and base64_img != "binascii.Error"
+        if request_new_session:
+            html_page = self.do_request_new_session(base64_img)
+            session_data["jsessionid"] = html_page.cookies['JSESSIONID']
+            session_data["keks"] = html_page.cookies['KEKS']
+            self.write_json_file("session_data.json", session_data)
+            cookies = dict(JSESSIONID=session_data["jsessionid"], KEKS=session_data["keks"])
 
         today = datetime.date.today()
         cur_day = today.day
@@ -135,9 +171,12 @@ class Appointment:
                 "action": "appointment_showMonth:Weiter"
             }
 
-            html_page_monthly = requests.post(url=self.__url_month_appointment, headers={'Content-Type': 'application/x-www-form-urlencoded'}, data=payload, cookies=cookies)
+            html_page = requests.post(url=self.__url_month_appointment,
+                                      headers=self.__headers,
+                                      data=payload,
+                                      cookies=cookies)
 
-            resp = str(html_page_monthly.content)
+            resp = str(html_page.content)
 
             if str("keine Termine").lower() in resp.lower():
                 print(date_to_check + ": keine Termine")
