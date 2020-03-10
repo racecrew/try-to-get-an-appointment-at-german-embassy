@@ -69,21 +69,31 @@ class Appointment:
         return self.__url_month_appointment + \
                "?locationCode=" + self.get_location_code() + \
                "&realmId=" + str(self.get_realm_id()) + \
-               "&categoryId=" + str(self.get_category_id())
+               "&categoryId=" + str(self.get_category_id()) + \
+               "&dateStr=" + (datetime.date.today()).strftime("%d.%m.%Y")
 
     def get_captcha_as_base64(self, html_page_content):
         soup = BeautifulSoup(html_page_content, features="lxml")
-        captcha_style_value = soup.find(name="captcha").find(name="div").get('style')
-        background_image_as_base64 = captcha_style_value[44:-78]
-        if background_image_as_base64:
-            # check if the string is base64 encoded, if not - return empty string
-            try:
-                base64.b64decode(background_image_as_base64)
-                return background_image_as_base64
-            except binascii.Error:
-                return "binascii.Error"
+        captcha_is_found = soup.find(name="captcha")
+        captcha_div_is_found = None
+        captcha_style_value = None
+        if captcha_is_found:
+            captcha_div_is_found = captcha_is_found.find(name="div")
+            captcha_style_value = soup.find(name="captcha").find(name="div").get('style')
+
+        if captcha_style_value:
+            background_image_as_base64 = captcha_style_value[44:-78]
+            if background_image_as_base64:
+                # check if the string is base64 encoded, if not - return empty string
+                try:
+                    base64.b64decode(background_image_as_base64)
+                    return background_image_as_base64
+                except binascii.Error:
+                    return "binascii.Error"
+            else:
+                return None
         else:
-            return ""
+            return None
 
     def write_json_file(self, filename, data):
         with open(filename, 'w') as outfile:
@@ -117,7 +127,8 @@ class Appointment:
 
                 return requests.post(url=self.__url_month_appointment,
                                      headers=self.__headers,
-                                     data=payload)
+                                     data=payload,
+                                     cookies=cookies)
             else:
                 sys.exit("extracted captcha is not a base64 encoded string")
 
@@ -125,27 +136,20 @@ class Appointment:
         session_data = self.read_json_file("session_data.json")
         cookies = dict(JSESSIONID=session_data["jsessionid"], KEKS=session_data["keks"])
 
-        date_to_check = (datetime.date.today()).strftime("%d.%m.%Y")
-        payload = {
-            "locationCode": '"' + self.get_location_code() + '"',
-            "realmId": str(self.get_realm_id()),
-            "categoryId": str(self.get_category_id()),
-            "dateStr": date_to_check,
-            "action": "appointment_showMonth:Weiter"
-        }
-        html_page = requests.post(url=self.__url_month_appointment,
-                                  headers=self.__headers,
-                                  cookies=cookies,
-                                  data=payload)
+        html_page = requests.get(url=self.get_url_month_appointment(),
+                                 headers=self.__headers,
+                                 cookies=cookies)
         base64_img = self.get_captcha_as_base64(html_page.content)
 
-        request_new_session = base64_img != "" and base64_img != "binascii.Error"
+        request_new_session = base64_img and base64_img != "" and base64_img != "binascii.Error"
         if request_new_session:
-            html_page = self.do_request_new_session(base64_img)
-            session_data["jsessionid"] = html_page.cookies['JSESSIONID']
-            session_data["keks"] = html_page.cookies['KEKS']
+            if 'JSESSIONID' in html_page.cookies:
+                session_data["jsessionid"] = html_page.cookies['JSESSIONID']
+            if 'KEKS' in html_page.cookies:
+                session_data["keks"] = html_page.cookies['KEKS']
             self.write_json_file("session_data.json", session_data)
             cookies = dict(JSESSIONID=session_data["jsessionid"], KEKS=session_data["keks"])
+            html_page = self.do_request_new_session(base64_img, cookies)
 
         today = datetime.date.today()
         cur_day = today.day
@@ -178,7 +182,10 @@ class Appointment:
 
             resp = str(html_page.content)
 
-            if str("keine Termine").lower() in resp.lower():
-                print(date_to_check + ": keine Termine")
+            if str("Termine").lower() in resp.lower():
+                if str("keine Termine").lower() in resp.lower():
+                    print(date_to_check + ": keine Termine")
+                else:
+                    print(date_to_check + ": Termine verfügbar")
             else:
-                print(date_to_check + ": Termine vorhanden")
+                print(date_to_check + ": keine Info über Termine")
